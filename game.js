@@ -71,6 +71,10 @@ const POWERUP_CHANCE  = 0.15;  // probabilidad por asteroide destruido
 const SHIELD_DURATION = 5;     // segundos de efecto
 const SHIELD_GRACE    = 0.6;   // segundos de gracia tras absorber un golpe
 
+// Power-up Cámara Lenta
+const SLOW_DURATION = 6;       // segundos de efecto
+const SLOW_FACTOR   = 0.5;     // multiplicador de velocidad de asteroides
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -275,7 +279,9 @@ class PowerUp {
     const pulse = 1 + Math.sin(this.t * 6) * 0.15;
     ctx.save();
     ctx.translate(this.x, this.y);
-    const color = this.type === 'shield' ? '#4f4' : '#0ff';
+    const color = this.type === 'shield' ? '#4f4'
+                : this.type === 'slow'   ? '#f8f'
+                : '#0ff';
     ctx.strokeStyle = color;
     ctx.lineWidth   = 1.5;
     ctx.beginPath();
@@ -300,6 +306,17 @@ class PowerUp {
       ctx.moveTo(-5, -1);
       ctx.lineTo( 5, -1);
       ctx.stroke();
+    } else if (this.type === 'slow') {
+      // Icono de reloj de arena
+      ctx.lineWidth = 1.3;
+      ctx.lineJoin  = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-5, -6);
+      ctx.lineTo( 5, -6);
+      ctx.lineTo(-5,  6);
+      ctx.lineTo( 5,  6);
+      ctx.closePath();
+      ctx.stroke();
     } else {
       // Texto "x3"
       ctx.fillStyle    = color;
@@ -314,7 +331,7 @@ class PowerUp {
 
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles;
-let powerUps, spawnedTypes, tripleTimer, shieldTimer, shieldGrace;
+let powerUps, spawnedTypes, tripleTimer, shieldTimer, shieldGrace, slowTimer;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
@@ -341,6 +358,7 @@ function initGame() {
   tripleTimer    = 0;
   shieldTimer    = 0;
   shieldGrace    = 0;
+  slowTimer      = 0;
   score  = 0;
   lives  = 3;
   level  = 1;
@@ -366,6 +384,7 @@ function killShip() {
   ship.dead = true;
   tripleTimer = 0;
   shieldTimer = 0;
+  slowTimer = 0;
   lives--;
   if (lives <= 0) {
     state = 'gameover';
@@ -401,11 +420,14 @@ function update(dt) {
 
   ship.update(dt);
   bullets.forEach(b => b.update(dt));
-  asteroids.forEach(a => a.update(dt));
+  // Cámara lenta: solo los asteroides (posición y rotación) van más lentos
+  const asteroidDt = slowTimer > 0 ? dt * SLOW_FACTOR : dt;
+  asteroids.forEach(a => a.update(asteroidDt));
   particles.forEach(p => p.update(dt));
   powerUps.forEach(p => p.update(dt));
   if (tripleTimer > 0) tripleTimer -= dt;
   if (shieldTimer > 0) shieldTimer -= dt;
+  if (slowTimer   > 0) slowTimer   -= dt;
   if (shieldGrace > 0) shieldGrace -= dt;
 
   bullets   = bullets.filter(b => !b.dead);
@@ -424,7 +446,7 @@ function update(dt) {
         // Power-ups: aleatorios, uno de cada tipo por nivel como mínimo.
         // Si es el último asteroide del nivel y aún no salió, sale seguro.
         const lastOne = newAsteroids.length === 0 && asteroids.every(o => o.dead);
-        for (const type of ['triple', 'shield']) {
+        for (const type of ['triple', 'shield', 'slow']) {
           if (!spawnedTypes.has(type) && (lastOne || Math.random() < POWERUP_CHANCE)) {
             powerUps.push(new PowerUp(a.x, a.y, type));
             spawnedTypes.add(type);
@@ -440,8 +462,9 @@ function update(dt) {
   if (!ship.dead) {
     for (const p of powerUps) {
       if (dist(ship, p) < ship.radius + p.radius) {
-        if (p.type === 'shield') shieldTimer = SHIELD_DURATION;
-        else tripleTimer = TRIPLE_DURATION;
+        if (p.type === 'shield')    shieldTimer = SHIELD_DURATION;
+        else if (p.type === 'slow') slowTimer   = SLOW_DURATION;
+        else                        tripleTimer = TRIPLE_DURATION;
         explode(p.x, p.y, 6);
         p.dead = true;
       }
@@ -501,15 +524,22 @@ function drawHUD() {
   for (let i = 0; i < lives; i++)
     drawLifeIcon(W - 16 - i * 22, 18);
 
+  // Indicadores de power-ups activos, apilados verticalmente
+  let y = 46;
+  ctx.textAlign = 'left';
   if (tripleTimer > 0) {
     ctx.fillStyle = '#0ff';
-    ctx.textAlign = 'left';
-    ctx.fillText(`TRIPLE ${Math.ceil(tripleTimer)}s`, 14, 46);
+    ctx.fillText(`TRIPLE ${Math.ceil(tripleTimer)}s`, 14, y);
+    y += 20;
   }
   if (shieldTimer > 0) {
     ctx.fillStyle = '#4f4';
-    ctx.textAlign = 'left';
-    ctx.fillText(`ESCUDO ${Math.ceil(shieldTimer)}s`, 14, tripleTimer > 0 ? 66 : 46);
+    ctx.fillText(`ESCUDO ${Math.ceil(shieldTimer)}s`, 14, y);
+    y += 20;
+  }
+  if (slowTimer > 0) {
+    ctx.fillStyle = '#f8f';
+    ctx.fillText(`LENTO ${Math.ceil(slowTimer)}s`, 14, y);
   }
 
 }
