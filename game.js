@@ -79,6 +79,13 @@ const SLOW_FACTOR   = 0.5;     // multiplicador de velocidad de asteroides
 const NOVA_CHANCE = 0.05;      // probabilidad por asteroide destruido (escaso)
 const NOVA_FLASH  = 0.35;      // segundos del destello en pantalla
 
+// Power-up Hiperpropulsión
+const HYPER_DURATION = 8;      // segundos de efecto
+const HYPER_THRUST   = 2.5;    // multiplicador de aceleración
+const HYPER_ROT      = 1.3;    // multiplicador de velocidad de giro
+const MAX_SPEED      = 340;    // px/s, velocidad máxima normal
+const HYPER_MAX      = 650;    // px/s, velocidad máxima con hiperpropulsión
+
 class Asteroid {
   constructor(x, y, size = 3) {
     this.x    = x;
@@ -157,8 +164,9 @@ class Ship {
     if (this.invincible    > 0) this.invincible    -= dt;
     if (this.shootCooldown > 0) this.shootCooldown -= dt;
 
-    const ROT   = 3.5;   // rad/s
-    const THRUST = 260;  // px/s²
+    const hyper  = hyperTimer > 0;
+    const ROT    = 3.5 * (hyper ? HYPER_ROT : 1);      // rad/s
+    const THRUST = 260 * (hyper ? HYPER_THRUST : 1);   // px/s²
     const DRAG   = 0.987;
 
     if (keys['ArrowLeft'])  this.angle -= ROT * dt;
@@ -172,6 +180,13 @@ class Ship {
 
     this.vx *= DRAG;
     this.vy *= DRAG;
+    // Tope de velocidad (más alto con hiperpropulsión)
+    const maxSpeed = hyper ? HYPER_MAX : MAX_SPEED;
+    const speed = Math.hypot(this.vx, this.vy);
+    if (speed > maxSpeed) {
+      this.vx *= maxSpeed / speed;
+      this.vy *= maxSpeed / speed;
+    }
     this.x = wrap(this.x + this.vx * dt, W);
     this.y = wrap(this.y + this.vy * dt, H);
   }
@@ -217,9 +232,10 @@ class Ship {
     if (this.thrusting && Math.random() > 0.35) {
       ctx.beginPath();
       ctx.moveTo(-8, -4);
-      ctx.lineTo(-8 - rand(6, 14), 0);
+      const hyper = hyperTimer > 0;
+      ctx.lineTo(-8 - (hyper ? rand(14, 26) : rand(6, 14)), 0);
       ctx.lineTo(-8,  4);
-      ctx.strokeStyle = 'rgba(255, 130, 0, 0.85)';
+      ctx.strokeStyle = hyper ? 'rgba(255, 255, 0, 0.9)' : 'rgba(255, 130, 0, 0.85)';
       ctx.stroke();
     }
 
@@ -286,6 +302,7 @@ class PowerUp {
     const color = this.type === 'shield' ? '#4f4'
                 : this.type === 'slow'   ? '#f8f'
                 : this.type === 'nova'   ? '#fa0'
+                : this.type === 'hyper'  ? '#ff0'
                 : '#0ff';
     ctx.strokeStyle = color;
     ctx.lineWidth   = 1.5;
@@ -332,6 +349,14 @@ class PowerUp {
         ctx.lineTo(Math.cos(a) * 7, Math.sin(a) * 7);
       }
       ctx.stroke();
+    } else if (this.type === 'hyper') {
+      // Icono de doble chevron >>
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin  = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-6, -5); ctx.lineTo(-1, 0); ctx.lineTo(-6, 5);
+      ctx.moveTo( 0, -5); ctx.lineTo( 5, 0); ctx.lineTo( 0, 5);
+      ctx.stroke();
     } else {
       // Texto "x3"
       ctx.fillStyle    = color;
@@ -347,7 +372,7 @@ class PowerUp {
 // ── Estado del juego ──────────────────────────────────────────────────────────
 let ship, bullets, asteroids, particles;
 let powerUps, spawnedTypes, tripleTimer, shieldTimer, shieldGrace, slowTimer;
-let novaReady, novaFlash;
+let novaReady, novaFlash, hyperTimer;
 let score, lives, level;
 let state;      // 'playing' | 'dead' | 'gameover'
 let deadTimer;
@@ -377,6 +402,7 @@ function initGame() {
   slowTimer      = 0;
   novaReady      = false;
   novaFlash      = 0;
+  hyperTimer     = 0;
   score  = 0;
   lives  = 3;
   level  = 1;
@@ -414,6 +440,7 @@ function killShip() {
   tripleTimer = 0;
   shieldTimer = 0;
   slowTimer = 0;
+  hyperTimer = 0;
   lives--;
   if (lives <= 0) {
     state = 'gameover';
@@ -462,8 +489,9 @@ function update(dt) {
   if (slowTimer   > 0) slowTimer   -= dt;
   if (shieldGrace > 0) shieldGrace -= dt;
   if (novaFlash   > 0) novaFlash   -= dt;
+  if (hyperTimer  > 0) hyperTimer  -= dt;
 
-  bullets   = bullets.filter(b => !b.dead);
+  bullets  = bullets.filter(b => !b.dead);
   particles = particles.filter(p => !p.dead);
 
   // Bala vs asteroide
@@ -479,7 +507,7 @@ function update(dt) {
         // Power-ups: aleatorios, uno de cada tipo por nivel como mínimo.
         // Si es el último asteroide del nivel y aún no salió, sale seguro.
         const lastOne = newAsteroids.length === 0 && asteroids.every(o => o.dead);
-        for (const type of ['triple', 'shield', 'slow', 'nova']) {
+        for (const type of ['triple', 'shield', 'slow', 'nova', 'hyper']) {
           const chance = type === 'nova' ? NOVA_CHANCE : POWERUP_CHANCE;
           if (!spawnedTypes.has(type) && (lastOne || Math.random() < chance)) {
             powerUps.push(new PowerUp(a.x, a.y, type));
@@ -499,6 +527,7 @@ function update(dt) {
         if (p.type === 'shield')    shieldTimer = SHIELD_DURATION;
         else if (p.type === 'slow') slowTimer   = SLOW_DURATION;
         else if (p.type === 'nova') novaReady   = true;
+        else if (p.type === 'hyper') hyperTimer = HYPER_DURATION;
         else                        tripleTimer = TRIPLE_DURATION;
         explode(p.x, p.y, 6);
         p.dead = true;
@@ -575,6 +604,11 @@ function drawHUD() {
   if (slowTimer > 0) {
     ctx.fillStyle = '#f8f';
     ctx.fillText(`LENTO ${Math.ceil(slowTimer)}s`, 14, y);
+    y += 20;
+  }
+  if (hyperTimer > 0) {
+    ctx.fillStyle = '#ff0';
+    ctx.fillText(`HIPER ${Math.ceil(hyperTimer)}s`, 14, y);
     y += 20;
   }
   if (novaReady) {
